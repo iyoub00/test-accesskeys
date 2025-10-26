@@ -323,20 +323,20 @@ Resources:
       HealthyThresholdCount: 2
       UnhealthyThresholdCount: 3
 
-#  ALBTargetGroupModel:
-#    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-#    Properties:
-#      Port: !Ref AppPort
-#      Protocol: HTTP
-#      VpcId: !Ref VPC
-#      TargetType: ip
-#      HealthCheckEnabled: true
-#      HealthCheckPath: /
-#      HealthCheckProtocol: HTTP
-#      HealthCheckIntervalSeconds: 30
-#      HealthCheckTimeoutSeconds: 5
-#      HealthyThresholdCount: 2
-#      UnhealthyThresholdCount: 3
+  #  ALBTargetGroupModel:
+  #    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  #    Properties:
+  #      Port: !Ref AppPort
+  #      Protocol: HTTP
+  #      VpcId: !Ref VPC
+  #      TargetType: ip
+  #      HealthCheckEnabled: true
+  #      HealthCheckPath: /
+  #      HealthCheckProtocol: HTTP
+  #      HealthCheckIntervalSeconds: 30
+  #      HealthCheckTimeoutSeconds: 5
+  #      HealthyThresholdCount: 2
+  #      UnhealthyThresholdCount: 3
 
   ALBListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -348,29 +348,29 @@ Resources:
         - Type: forward
           TargetGroupArn: !Ref ALBTargetGroupApp
 
-#  ALBListenerRuleModel:
-#    Type: AWS::ElasticLoadBalancingV2::ListenerRule
-#    Properties:
-#      ListenerArn: !Ref ALBListener
-#      Priority: 10
-#      Conditions:
-#        - Field: path-pattern
-#          Values: [ "/model*", "/model/*" ]
-#      Actions:
-#        - Type: forward
-#          TargetGroupArn: !Ref ALBTargetGroupModel
+  #  ALBListenerRuleModel:
+  #    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+  #    Properties:
+  #      ListenerArn: !Ref ALBListener
+  #      Priority: 10
+  #      Conditions:
+  #        - Field: path-pattern
+  #          Values: [ "/model*", "/model/*" ]
+  #      Actions:
+  #        - Type: forward
+  #          TargetGroupArn: !Ref ALBTargetGroupModel
 
-#  ALBListenerRuleApp:
-#    Type: AWS::ElasticLoadBalancingV2::ListenerRule
-#    Properties:
-#      ListenerArn: !Ref ALBListener
-#      Priority: 20
-#      Conditions:
-#        - Field: path-pattern
-#          Values: [ "/app*", "/app/*" ]
-#      Actions:
-#        - Type: forward
-#          TargetGroupArn: !Ref ALBTargetGroupApp
+  #  ALBListenerRuleApp:
+  #    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+  #    Properties:
+  #      ListenerArn: !Ref ALBListener
+  #      Priority: 20
+  #      Conditions:
+  #        - Field: path-pattern
+  #          Values: [ "/app*", "/app/*" ]
+  #      Actions:
+  #        - Type: forward
+  #          TargetGroupArn: !Ref ALBTargetGroupApp
 
 
   # ECS Cluster & IAM
@@ -489,36 +489,36 @@ Resources:
 
   # ECS Task Definitions
 
-#  FargateTaskDefinitionModel:
-#    Type: AWS::ECS::TaskDefinition
-#    Properties:
-#      Family: !Sub '${ProjectName}-model-task'
-#      NetworkMode: awsvpc
-#      RequiresCompatibilities: [ FARGATE ]
-#      Cpu: '512'
-#      Memory: '1024'
-#      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
-#      TaskRoleArn: !GetAtt ECSTaskRole.Arn
-#      ContainerDefinitions:
-#        - Name: model-container
-#          Image: !Ref ContainerImage
-#          Essential: true
-#          PortMappings:
-#            - ContainerPort: !Ref AppPort
-#              Protocol: tcp
-#          LogConfiguration:
-#            LogDriver: awslogs
-#            Options:
-#              awslogs-group: !Ref ECSLogGroup
-#              awslogs-region: !Ref AWS::Region
-#              awslogs-stream-prefix: model
-#          Environment:
-#            - Name: S3_BUCKET
-#              Value: !Ref S3Bucket
-#            - Name: RDS_ENDPOINT
-#              Value: !GetAtt RDSInstance.Endpoint.Address
-#            - Name: DYNAMODB_TABLE
-#              Value: !Ref DynamoDBTable
+  #  FargateTaskDefinitionModel:
+  #    Type: AWS::ECS::TaskDefinition
+  #    Properties:
+  #      Family: !Sub '${ProjectName}-model-task'
+  #      NetworkMode: awsvpc
+  #      RequiresCompatibilities: [ FARGATE ]
+  #      Cpu: '512'
+  #      Memory: '1024'
+  #      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+  #      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+  #      ContainerDefinitions:
+  #        - Name: model-container
+  #          Image: !Ref ContainerImage
+  #          Essential: true
+  #          PortMappings:
+  #            - ContainerPort: !Ref AppPort
+  #              Protocol: tcp
+  #          LogConfiguration:
+  #            LogDriver: awslogs
+  #            Options:
+  #              awslogs-group: !Ref ECSLogGroup
+  #              awslogs-region: !Ref AWS::Region
+  #              awslogs-stream-prefix: model
+  #          Environment:
+  #            - Name: S3_BUCKET
+  #              Value: !Ref S3Bucket
+  #            - Name: RDS_ENDPOINT
+  #              Value: !GetAtt RDSInstance.Endpoint.Address
+  #            - Name: DYNAMODB_TABLE
+  #              Value: !Ref DynamoDBTable
 
   FargateTaskDefinitionApp:
     Type: AWS::ECS::TaskDefinition
@@ -574,28 +574,28 @@ Resources:
 
   # ECS Services
 
-#  ECSServiceModel:
-#    Type: AWS::ECS::Service
-#    DependsOn: ALBListener
-#    Properties:
-#      ServiceName: !Sub '${ProjectName}-model-service'
-#      Cluster: !Ref ECSCluster
-#      TaskDefinition: !Ref FargateTaskDefinitionModel
-#      DesiredCount: 1
-#      LaunchType: FARGATE
-#      NetworkConfiguration:
-#        AwsvpcConfiguration:
-#          AssignPublicIp: DISABLED
-#          Subnets:
-#            - !Ref PrivateSubnet1
-#            - !Ref PrivateSubnet2
-#          SecurityGroups:
-#            - !Ref FargateSecurityGroup
-#      LoadBalancers:
-#        - ContainerName: model-container
-#          ContainerPort: !Ref AppPort
-#          TargetGroupArn: !Ref ALBTargetGroupModel
-#      HealthCheckGracePeriodSeconds: 60
+  #  ECSServiceModel:
+  #    Type: AWS::ECS::Service
+  #    DependsOn: ALBListener
+  #    Properties:
+  #      ServiceName: !Sub '${ProjectName}-model-service'
+  #      Cluster: !Ref ECSCluster
+  #      TaskDefinition: !Ref FargateTaskDefinitionModel
+  #      DesiredCount: 1
+  #      LaunchType: FARGATE
+  #      NetworkConfiguration:
+  #        AwsvpcConfiguration:
+  #          AssignPublicIp: DISABLED
+  #          Subnets:
+  #            - !Ref PrivateSubnet1
+  #            - !Ref PrivateSubnet2
+  #          SecurityGroups:
+  #            - !Ref FargateSecurityGroup
+  #      LoadBalancers:
+  #        - ContainerName: model-container
+  #          ContainerPort: !Ref AppPort
+  #          TargetGroupArn: !Ref ALBTargetGroupModel
+  #      HealthCheckGracePeriodSeconds: 60
 
   ECSServiceApp:
     Type: AWS::ECS::Service
@@ -706,7 +706,151 @@ Resources:
         - Key: Name
           Value: !Sub '${ProjectName}-dynamodb'
 
+  # ============================================================================
+  # Database Initialization Lambda Function
+  # ============================================================================
 
+  DBInitLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-db-init-lambda-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: ECSRunTaskPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ecs:RunTask'
+                  - 'ecs:DescribeTasks'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'iam:PassRole'
+                Resource:
+                  - !GetAtt ECSTaskExecutionRole.Arn
+                  - !GetAtt ECSTaskRole.Arn
+
+  DBInitLambdaFunction:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - RDSInstance
+      - FargateTaskDefinitionApp
+    Properties:
+      FunctionName: !Sub '${ProjectName}-db-init'
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Role: !GetAtt DBInitLambdaRole.Arn
+      Timeout: 900
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref FargateSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+      Environment:
+        Variables:
+          CLUSTER_NAME: !Ref ECSCluster
+          TASK_DEFINITION: !Ref FargateTaskDefinitionApp
+          SUBNETS: !Sub '${PrivateSubnet1},${PrivateSubnet2}'
+          SECURITY_GROUP: !Ref FargateSecurityGroup
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import time
+          import cfnresponse
+          
+          ecs = boto3.client('ecs')
+          
+          def lambda_handler(event, context):
+              print(f"Event: {json.dumps(event)}")
+          
+              if event.get('RequestType') in ['Delete', 'Update']:
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  return
+          
+              try:
+                  cluster = event['ResourceProperties']['ClusterName']
+                  task_def = event['ResourceProperties']['TaskDefinition']
+                  subnets = event['ResourceProperties']['Subnets'].split(',')
+                  security_group = event['ResourceProperties']['SecurityGroup']
+          
+                  response = ecs.run_task(
+                      cluster=cluster,
+                      taskDefinition=task_def,
+                      launchType='FARGATE',
+                      networkConfiguration={
+                          'awsvpcConfiguration': {
+                              'subnets': subnets,
+                              'securityGroups': [security_group],
+                              'assignPublicIp': 'DISABLED'
+                          }
+                      },
+                      overrides={
+                          'containerOverrides': [
+                              {
+                                  'name': 'app-container',
+                                  'command': ['python', 'init_db.py']
+                              }
+                          ]
+                      }
+                  )
+          
+                  task_arn = response['tasks'][0]['taskArn']
+                  print(f"Task started: {task_arn}")
+          
+                  max_attempts = 60
+                  attempt = 0
+          
+                  while attempt < max_attempts:
+                      time.sleep(10)
+                      task_response = ecs.describe_tasks(cluster=cluster, tasks=[task_arn])
+          
+                      if task_response['tasks']:
+                          status = task_response['tasks'][0]['lastStatus']
+          
+                          if status == 'STOPPED':
+                              exit_code = task_response['tasks'][0]['containers'][0].get('exitCode', 1)
+          
+                              if exit_code == 0:
+                                  cfnresponse.send(event, context, cfnresponse.SUCCESS, 
+                                                 {'Message': 'Database initialized'})
+                                  return
+                              else:
+                                  cfnresponse.send(event, context, cfnresponse.FAILED, 
+                                                 {'Message': f'Init failed: {exit_code}'})
+                                  return
+                      attempt += 1
+          
+                  cfnresponse.send(event, context, cfnresponse.FAILED, 
+                                 {'Message': 'Timeout'})
+          
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, 
+                                 {'Message': str(e)})
+
+  DBInitCustomResource:
+    Type: Custom::DBInitializer
+    DependsOn:
+      - ECSServiceApp
+      - RDSInstance
+    Properties:
+      ServiceToken: !GetAtt DBInitLambdaFunction.Arn
+      ClusterName: !Ref ECSCluster
+      TaskDefinition: !Ref FargateTaskDefinitionApp
+      Subnets: !Sub '${PrivateSubnet1},${PrivateSubnet2}'
+      SecurityGroup: !Ref FargateSecurityGroup
 Outputs:
   VPCId:
     Description: 'VPC ID'
@@ -743,3 +887,7 @@ Outputs:
   VPCFlowLogsGroupName:
     Description: 'CloudWatch Log Group for VPC Flow Logs'
     Value: !Ref VPCFlowLogsGroup
+
+  DBInitStatus:
+    Description: 'Database Initialization Status'
+    Value: !GetAtt DBInitCustomResource.Message

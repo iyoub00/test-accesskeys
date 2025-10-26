@@ -291,6 +291,24 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-rds-sg'
+  RDSSecurityGroupIngressFromLambda:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RDSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref LambdaSecurityGroup
+      Description: 'Allow Lambda to initialize database'
+
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Security group for database initialization Lambda'
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-lambda-sg'
 
   # Application Load Balancer
 
@@ -480,6 +498,91 @@ Resources:
         - Key: Name
           Value: !Sub '${ProjectName}-ecs-task-role'
 
+  DBInitLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-db-init'
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt DBInitLambdaRole.Arn
+      Timeout: 300
+      VpcConfig:
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+      Environment:
+        Variables:
+          DB_HOST: !GetAtt RDSInstance.Endpoint.Address
+          DB_USER: !Ref DBUsername
+          DB_PASS: !Ref DBPassword
+          S3_BUCKET: !Ref S3Bucket
+      Layers:
+        - arn:aws:lambda:eu-west-1:770693421928:layer:Klayers-p311-psycopg2:5
+      Code:
+        ZipFile: |
+          import psycopg2, boto3, cfnresponse, os, time
+
+          def handler(event, context):
+              if event['RequestType'] != 'Create':
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  return
+              try:
+                  # Wait for RDS
+                  for i in range(30):
+                      try:
+                          conn = psycopg2.connect(host=os.environ['DB_HOST'], database='postgres', 
+                                                  user=os.environ['DB_USER'], password=os.environ['DB_PASS'])
+                          conn.close()
+                          break
+                      except:
+                          time.sleep(10)
+
+                  # Get scripts from S3
+                  s3 = boto3.client('s3')
+                  ddl = s3.get_object(Bucket=os.environ['S3_BUCKET'], Key='data/ddl.sql')['Body'].read().decode()
+                  init = s3.get_object(Bucket=os.environ['S3_BUCKET'], Key='data/init.sql')['Body'].read().decode()
+
+                  # Run scripts
+                  conn = psycopg2.connect(host=os.environ['DB_HOST'], database='postgres',
+                                          user=os.environ['DB_USER'], password=os.environ['DB_PASS'])
+                  cur = conn.cursor()
+                  cur.execute(ddl)
+                  cur.execute(init)
+                  conn.commit()
+                  conn.close()
+
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+          
+
+  DBInitLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole'
+      Policies:
+        - PolicyName: S3ReadAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:GetObject'
+                Resource: !Sub '${S3Bucket.Arn}/*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-db-init-lambda-role'
+
   ECSLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -551,7 +654,7 @@ Resources:
             - Name: DYNAMODB_TABLE
               Value: !Ref DynamoDBTable
             - Name: DB_NAME
-              Value: 'silicon_talent_acquisition_app'
+              Value: 'postgres'
             - Name: DB_USER
               Value: !Ref DBUsername
             - Name: DB_PASS
@@ -705,6 +808,17 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-dynamodb'
+
+  # Database Initialization Trigger
+
+  DBInitTrigger:
+    Type: Custom::DBInit
+    DependsOn:
+      - RDSInstance
+      - DBInitLambda
+      - S3Bucket
+    Properties:
+      ServiceToken: !GetAtt DBInitLambda.Arn
 
 
 Outputs:

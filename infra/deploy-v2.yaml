@@ -1,0 +1,859 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'silicon talent acquisition (coexists with older stack)'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: 'silicon-talent-acquisition'
+    Description: 'silicon talent acquisition'
+
+  DBUsername:
+    Type: String
+    Default: 'master'
+    Description: 'Master username pour RDS'
+    NoEcho: false
+
+  DBPassword:
+    Type: String
+    NoEcho: true
+    Description: 'Master password pour RDS'
+    MinLength: 8
+
+  ContainerImage:
+    Type: String
+    Default: '881490114584.dkr.ecr.eu-west-1.amazonaws.com/ecs-lambda:latest'
+    Description: 'ECR Image URI (repo:tag) for both ECS task definitions'
+
+  AppPort:
+    Type: Number
+    Default: 5000
+    Description: 'Port for the flask app (Flask = 5000)'
+
+  LogGroupName:
+    Type: String
+    Default: 'silicon-talent-acquisition-agent'
+    Description: 'Existing CloudWatch Log Group name'
+
+  LogStreamCandidate:
+    Type: String
+    Default: 'silicon-talent-acquisition-agent-candidate'
+    Description: 'Log stream for candidate operations'
+
+  LogStreamRecruiter:
+    Type: String
+    Default: 'silicon-talent-acquisition-agent-recruiter'
+    Description: 'Log stream for recruiter operations'
+
+  LogStreamSystem:
+    Type: String
+    Default: 'silicon-talent-acquisition-agent-system'
+    Description: 'Log stream for system operations'
+
+Resources:
+
+
+  # VPC & Networking
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-vpc'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-igw'
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-public-subnet-1'
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-public-subnet-2'
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.11.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-private-subnet-1'
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.12.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-private-subnet-2'
+
+  NATGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachGateway
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-nat-eip'
+
+  NATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-nat'
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-public-rt'
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-private-rt'
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  # VPC Flow Logs
+
+  VPCFlowLogsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: vpc-flow-logs.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: CloudWatchLogPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                  - 'logs:DescribeLogGroups'
+                  - 'logs:DescribeLogStreams'
+                Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-vpc-flow-logs-role'
+
+  VPCFlowLogsGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/vpc/${ProjectName}-flow-logs'
+      RetentionInDays: 7
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-vpc-flow-logs'
+
+  VPCFlowLog:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      ResourceType: VPC
+      ResourceId: !Ref VPC
+      TrafficType: ALL
+      LogDestinationType: cloud-watch-logs
+      LogDestination: !GetAtt VPCFlowLogsGroup.Arn
+      DeliverLogsPermissionArn: !GetAtt VPCFlowLogsRole.Arn
+      LogFormat: '${version} ${account-id} ${interface-id} ${srcaddr} ${dstaddr} ${srcport} ${dstport} ${protocol} ${packets} ${bytes} ${start} ${end} ${action} ${log-status}'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-vpc-flow-log'
+
+  # Security Groups
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Security group pour ALB'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-alb-sg'
+
+  FargateSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Security group pour Fargate tasks'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref AppPort
+          ToPort: !Ref AppPort
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-fargate-sg'
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Security group pour RDS (PostgreSQL)'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref FargateSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-rds-sg'
+  RDSSecurityGroupIngressFromLambda:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RDSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref LambdaSecurityGroup
+      Description: 'Allow Lambda to initialize database'
+
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Security group for database initialization Lambda'
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-lambda-sg'
+
+  # Application Load Balancer
+
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Type: application
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-alb'
+
+  ALBTargetGroupApp:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Port: !Ref AppPort
+      Protocol: HTTP
+      VpcId: !Ref VPC
+      TargetType: ip
+      HealthCheckEnabled: true
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+#  ALBTargetGroupModel:
+#    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+#    Properties:
+#      Port: !Ref AppPort
+#      Protocol: HTTP
+#      VpcId: !Ref VPC
+#      TargetType: ip
+#      HealthCheckEnabled: true
+#      HealthCheckPath: /
+#      HealthCheckProtocol: HTTP
+#      HealthCheckIntervalSeconds: 30
+#      HealthCheckTimeoutSeconds: 5
+#      HealthyThresholdCount: 2
+#      UnhealthyThresholdCount: 3
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroupApp
+
+#  ALBListenerRuleModel:
+#    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+#    Properties:
+#      ListenerArn: !Ref ALBListener
+#      Priority: 10
+#      Conditions:
+#        - Field: path-pattern
+#          Values: [ "/model*", "/model/*" ]
+#      Actions:
+#        - Type: forward
+#          TargetGroupArn: !Ref ALBTargetGroupModel
+
+#  ALBListenerRuleApp:
+#    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+#    Properties:
+#      ListenerArn: !Ref ALBListener
+#      Priority: 20
+#      Conditions:
+#        - Field: path-pattern
+#          Values: [ "/app*", "/app/*" ]
+#      Actions:
+#        - Type: forward
+#          TargetGroupArn: !Ref ALBTargetGroupApp
+
+
+  # ECS Cluster & IAM
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-cluster'
+
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-ecs-execution-role'
+
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: ComprehendAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - comprehend:DetectSentiment
+                Resource: "*"
+
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:ListAllMyBuckets'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 's3:GetObject'
+                  - 's3:PutObject'
+                  - 's3:ListBucket'
+                Resource:
+                  - !GetAtt S3Bucket.Arn
+                  - !Sub '${S3Bucket.Arn}/*'
+        - PolicyName: BedrockAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'bedrock:InvokeModel'
+                  - 'bedrock:InvokeModelWithResponseStream'
+                Resource: 'arn:aws:bedrock:eu-west-1::foundation-model/amazon.titan-embed-text-v2:0'
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:PutItem'
+                  - 'dynamodb:GetItem'
+                  - 'dynamodb:UpdateItem'
+                  - 'dynamodb:DeleteItem'
+                  - 'dynamodb:Query'
+                  - 'dynamodb:Scan'
+                  - 'dynamodb:BatchGetItem'
+                  - 'dynamodb:BatchWriteItem'
+                Resource: !GetAtt DynamoDBTable.Arn
+
+        - PolicyName: CloudWatchLogsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                  - 'logs:DescribeLogStreams'
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:${LogGroupName}:*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-ecs-task-role'
+
+  DBInitLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-db-init'
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt DBInitLambdaRole.Arn
+      Timeout: 300
+      VpcConfig:
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+      Environment:
+        Variables:
+          DB_HOST: !GetAtt RDSInstance.Endpoint.Address
+          DB_USER: !Ref DBUsername
+          DB_PASS: !Ref DBPassword
+          S3_BUCKET: !Ref S3Bucket
+      Layers:
+        - arn:aws:lambda:eu-west-1:898466741470:layer:psycopg2-py311:1
+      Code:
+        ZipFile: |
+          import psycopg2, boto3, cfnresponse, os, time
+
+          def handler(event, context):
+              if event['RequestType'] != 'Create':
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  return
+              try:
+                  # Wait for RDS
+                  for i in range(30):
+                      try:
+                          conn = psycopg2.connect(host=os.environ['DB_HOST'], database='postgres', 
+                                                  user=os.environ['DB_USER'], password=os.environ['DB_PASS'])
+                          conn.close()
+                          break
+                      except:
+                          time.sleep(10)
+
+                  # Get scripts from S3
+                  s3 = boto3.client('s3')
+                  ddl = s3.get_object(Bucket=os.environ['S3_BUCKET'], Key='data/ddl.sql')['Body'].read().decode()
+                  init = s3.get_object(Bucket=os.environ['S3_BUCKET'], Key='data/init.sql')['Body'].read().decode()
+
+                  # Run scripts
+                  conn = psycopg2.connect(host=os.environ['DB_HOST'], database='postgres',
+                                          user=os.environ['DB_USER'], password=os.environ['DB_PASS'])
+                  cur = conn.cursor()
+                  cur.execute(ddl)
+                  cur.execute(init)
+                  conn.commit()
+                  conn.close()
+
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+          
+
+  DBInitLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole'
+      Policies:
+        - PolicyName: S3ReadAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:GetObject'
+                Resource: !Sub '${S3Bucket.Arn}/*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-db-init-lambda-role'
+
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${ProjectName}-${AWS::StackName}'
+      RetentionInDays: 7
+
+
+  # ECS Task Definitions
+
+#  FargateTaskDefinitionModel:
+#    Type: AWS::ECS::TaskDefinition
+#    Properties:
+#      Family: !Sub '${ProjectName}-model-task'
+#      NetworkMode: awsvpc
+#      RequiresCompatibilities: [ FARGATE ]
+#      Cpu: '512'
+#      Memory: '1024'
+#      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+#      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+#      ContainerDefinitions:
+#        - Name: model-container
+#          Image: !Ref ContainerImage
+#          Essential: true
+#          PortMappings:
+#            - ContainerPort: !Ref AppPort
+#              Protocol: tcp
+#          LogConfiguration:
+#            LogDriver: awslogs
+#            Options:
+#              awslogs-group: !Ref ECSLogGroup
+#              awslogs-region: !Ref AWS::Region
+#              awslogs-stream-prefix: model
+#          Environment:
+#            - Name: S3_BUCKET
+#              Value: !Ref S3Bucket
+#            - Name: RDS_ENDPOINT
+#              Value: !GetAtt RDSInstance.Endpoint.Address
+#            - Name: DYNAMODB_TABLE
+#              Value: !Ref DynamoDBTable
+
+  FargateTaskDefinitionApp:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${ProjectName}-app-task'
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [ FARGATE ]
+      Cpu: '512'
+      Memory: '1024'
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      ContainerDefinitions:
+        - Name: app-container
+          Image: !Ref ContainerImage
+          Essential: true
+          PortMappings:
+            - ContainerPort: !Ref AppPort
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: app
+          Environment:
+            - Name: S3_BUCKET
+              Value: !Ref S3Bucket
+            - Name: RDS_ENDPOINT
+              Value: !GetAtt RDSInstance.Endpoint.Address
+            - Name: DYNAMODB_TABLE
+              Value: !Ref DynamoDBTable
+            - Name: DB_NAME
+              Value: 'postgres'
+            - Name: DB_USER
+              Value: !Ref DBUsername
+            - Name: DB_PASS
+              Value: !Ref DBPassword
+            - Name: DB_HOST
+              Value: !GetAtt RDSInstance.Endpoint.Address
+            - Name: DB_PORT
+              Value: '5432'
+            - Name: LOG_GROUP_NAME
+              Value: !Ref LogGroupName
+            - Name: LOG_STREAM_NAME_CANDIDATE
+              Value: !Ref LogStreamCandidate
+            - Name: LOG_STREAM_NAME_RECRUITER
+              Value: !Ref LogStreamRecruiter
+            - Name: LOG_STREAM_NAME_SYSTEM
+              Value: !Ref LogStreamSystem
+            - Name: BUCKET_NAME
+              Value: !Ref S3Bucket
+
+
+  # ECS Services
+
+#  ECSServiceModel:
+#    Type: AWS::ECS::Service
+#    DependsOn: ALBListener
+#    Properties:
+#      ServiceName: !Sub '${ProjectName}-model-service'
+#      Cluster: !Ref ECSCluster
+#      TaskDefinition: !Ref FargateTaskDefinitionModel
+#      DesiredCount: 1
+#      LaunchType: FARGATE
+#      NetworkConfiguration:
+#        AwsvpcConfiguration:
+#          AssignPublicIp: DISABLED
+#          Subnets:
+#            - !Ref PrivateSubnet1
+#            - !Ref PrivateSubnet2
+#          SecurityGroups:
+#            - !Ref FargateSecurityGroup
+#      LoadBalancers:
+#        - ContainerName: model-container
+#          ContainerPort: !Ref AppPort
+#          TargetGroupArn: !Ref ALBTargetGroupModel
+#      HealthCheckGracePeriodSeconds: 60
+
+  ECSServiceApp:
+    Type: AWS::ECS::Service
+    DependsOn: ALBListener
+    Properties:
+      ServiceName: !Sub '${ProjectName}-app-service'
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref FargateTaskDefinitionApp
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+          SecurityGroups:
+            - !Ref FargateSecurityGroup
+      LoadBalancers:
+        - ContainerName: app-container
+          ContainerPort: !Ref AppPort
+          TargetGroupArn: !Ref ALBTargetGroupApp
+      HealthCheckGracePeriodSeconds: 60
+
+
+  # RDS (PostgreSQL)
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: 'Subnet group pour RDS'
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-db-subnet-group'
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    Properties:
+
+      DBInstanceClass: db.t3.micro
+      Engine: postgres
+      Port: 5432
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      AllocatedStorage: '20'
+      StorageType: gp3
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: '03:00-04:00'
+      PreferredMaintenanceWindow: 'sun:04:00-sun:05:00'
+      MultiAZ: false
+      PubliclyAccessible: false
+      EnableCloudwatchLogsExports:
+        - postgresql
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-rds'
+
+
+  # S3 Bucket
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-s3'
+
+  # DynamoDB Table
+
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    Properties:
+      TableName: !Sub '${ProjectName}-table'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-dynamodb'
+
+  # Database Initialization Trigger
+
+  DBInitTrigger:
+    Type: Custom::DBInit
+    DependsOn:
+      - RDSInstance
+      - DBInitLambda
+      - S3Bucket
+    Properties:
+      ServiceToken: !GetAtt DBInitLambda.Arn
+
+
+Outputs:
+  VPCId:
+    Description: 'VPC ID'
+    Value: !Ref VPC
+
+  ALBDNSName:
+    Description: 'DNS name du Load Balancer'
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+
+  ECSClusterName:
+    Description: 'Nom du cluster ECS'
+    Value: !Ref ECSCluster
+
+  RDSEndpoint:
+    Description: 'Endpoint RDS'
+    Value: !GetAtt RDSInstance.Endpoint.Address
+
+  S3BucketName:
+    Description: 'Nom du bucket S3'
+    Value: !Ref S3Bucket
+
+  NATGatewayIP:
+    Description: 'IP publique du NAT Gateway'
+    Value: !Ref NATGatewayEIP
+
+  DynamoDBTableName:
+    Description: 'DynamoDB Table Name'
+    Value: !Ref DynamoDBTable
+
+  DynamoDBTableArn:
+    Description: 'DynamoDB Table ARN'
+    Value: !GetAtt DynamoDBTable.Arn
+
+  VPCFlowLogsGroupName:
+    Description: 'CloudWatch Log Group for VPC Flow Logs'
+    Value: !Ref VPCFlowLogsGroup

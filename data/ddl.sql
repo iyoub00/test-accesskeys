@@ -11,7 +11,7 @@ DROP TYPE IF EXISTS STATUS;
 ------------------------------
 -- Database Creation
 ------------------------------
--- create database silicon_talent_acquisition_app;
+create database silicon_talent_acquisition_app;
 
 ------------------------------
 -- Schema Creation

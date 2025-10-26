@@ -1,4 +1,7 @@
 from flask import Flask
+import init_db
+init_db.initialize_database()
+
 app = Flask(__name__)
 
 @app.get("/")

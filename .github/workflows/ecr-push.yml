@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -29,7 +31,7 @@ jobs:
       - name: Compute version tag (Vx.y.zz from commit count)
         id: ver
         run: |
-          COMMITS=$(git rev-list --count HEAD)
+          COMMITS=$(git rev-list --count --first-parent HEAD)
           X=$(( COMMITS / 1000 ))
           Y=$(( (COMMITS / 100) % 10 ))
           Z=$(( COMMITS % 100 ))

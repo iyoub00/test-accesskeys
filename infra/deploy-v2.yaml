@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'silicon talent acquisition (coexists with older stack)'
+Description: 'silicon talent acquisition'
 
 Parameters:
   ProjectName:
@@ -21,7 +21,7 @@ Parameters:
 
   ContainerImage:
     Type: String
-    Default: '881490114584.dkr.ecr.eu-west-1.amazonaws.com/ecs-lambda:latest'
+    Default: '789650815687.dkr.ecr.eu-west-1.amazonaws.com/silicon-talent-acquisition-agent/app:4bd13d45f651ffdd2b6912a708c7599547ff6ec4'
     Description: 'ECR Image URI (repo:tag) for both ECS task definitions'
 
   AppPort:
@@ -48,6 +48,16 @@ Parameters:
     Type: String
     Default: 'silicon-talent-acquisition-agent-system'
     Description: 'Log stream for system operations'
+
+  #  DynamoDBTable:
+  #    Type: String
+  #    Default: ''
+  #    Description: 'DynamoDB table'
+
+  S3Bucket:
+    Type: String
+    Default: 'silicon-talent-acquisition-agent'
+    Description: 'existing S3'
 
 Resources:
 
@@ -387,6 +397,8 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-cluster'
+        - Key: app
+          Value: silicon-talent-acquisition-agent
 
   ECSTaskExecutionRole:
     Type: AWS::IAM::Role
@@ -403,6 +415,8 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-ecs-execution-role'
+        - Key: app
+          Value: silicon-talent-acquisition-agent
 
   ECSTaskRole:
     Type: AWS::IAM::Role
@@ -437,6 +451,9 @@ Resources:
                   - 's3:GetObject'
                   - 's3:PutObject'
                   - 's3:ListBucket'
+                #                Resource:
+                #                  - !Sub 'arn:aws:s3:::${S3Bucket}'
+                #                  - !Sub 'arn:aws:s3:::${S3Bucket}/*'
                 Resource:
                   - !GetAtt S3Bucket.Arn
                   - !Sub '${S3Bucket.Arn}/*'
@@ -463,6 +480,7 @@ Resources:
                   - 'dynamodb:Scan'
                   - 'dynamodb:BatchGetItem'
                   - 'dynamodb:BatchWriteItem'
+                #                Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoDBTable}'
                 Resource: !GetAtt DynamoDBTable.Arn
 
         - PolicyName: CloudWatchLogsAccess
@@ -479,6 +497,8 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-ecs-task-role'
+        - Key: app
+          Value: silicon-talent-acquisition-agent
 
   ECSLogGroup:
     Type: AWS::Logs::LogGroup
@@ -663,52 +683,50 @@ Resources:
 
   # S3 Bucket
 
-  S3Bucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      VersioningConfiguration:
-        Status: Enabled
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-s3'
+  #  S3Bucket:
+  #    Type: AWS::S3::Bucket
+  #    Properties:
+  #      BucketEncryption:
+  #        ServerSideEncryptionConfiguration:
+  #          - ServerSideEncryptionByDefault:
+  #              SSEAlgorithm: AES256
+  #      PublicAccessBlockConfiguration:
+  #        BlockPublicAcls: true
+  #        BlockPublicPolicy: true
+  #        IgnorePublicAcls: true
+  #        RestrictPublicBuckets: true
+  #      VersioningConfiguration:
+  #        Status: Enabled
+  #      Tags:
+  #        - Key: Name
+  #          Value: !Sub '${ProjectName}-s3'
 
   # DynamoDB Table
 
-  DynamoDBTable:
-    Type: AWS::DynamoDB::Table
-    DeletionPolicy: Retain
-    Properties:
-      TableName: !Sub '${ProjectName}-table'
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: id
-          AttributeType: S
-      KeySchema:
-        - AttributeName: id
-          KeyType: HASH
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
-      SSESpecification:
-        SSEEnabled: true
-        SSEType: KMS
-      StreamSpecification:
-        StreamViewType: NEW_AND_OLD_IMAGES
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-dynamodb'
+  #  DynamoDBTable:
+  #    Type: AWS::DynamoDB::Table
+  #    DeletionPolicy: Retain
+  #    Properties:
+  #      TableName: !Sub '${ProjectName}-table'
+  #      BillingMode: PAY_PER_REQUEST
+  #      AttributeDefinitions:
+  #        - AttributeName: id
+  #          AttributeType: S
+  #      KeySchema:
+  #        - AttributeName: id
+  #          KeyType: HASH
+  #      PointInTimeRecoverySpecification:
+  #        PointInTimeRecoveryEnabled: true
+  #      SSESpecification:
+  #        SSEEnabled: true
+  #        SSEType: KMS
+  #      StreamSpecification:
+  #        StreamViewType: NEW_AND_OLD_IMAGES
+  #      Tags:
+  #        - Key: Name
+  #          Value: !Sub '${ProjectName}-dynamodb'
 
-  # ============================================================================
   # Database Initialization Lambda Function
-  # ============================================================================
 
   DBInitLambdaRole:
     Type: AWS::IAM::Role
@@ -786,6 +804,7 @@ Resources:
                   subnets = event['ResourceProperties']['Subnets'].split(',')
                   security_group = event['ResourceProperties']['SecurityGroup']
           
+                  # Start the ECS Fargate task to run database initialization
                   response = ecs.run_task(
                       cluster=cluster,
                       taskDefinition=task_def,
@@ -798,6 +817,7 @@ Resources:
                           }
                       },
                       overrides={
+                          # Override the default container command to run initialization script
                           'containerOverrides': [
                               {
                                   'name': 'app-container',
@@ -807,12 +827,15 @@ Resources:
                       }
                   )
           
+                  # Extract the task ARN from the response
                   task_arn = response['tasks'][0]['taskArn']
                   print(f"Task started: {task_arn}")
           
+                  # Set up polling loop to monitor task completion
                   max_attempts = 60
                   attempt = 0
           
+                  # Check if task information is available
                   while attempt < max_attempts:
                       time.sleep(10)
                       task_response = ecs.describe_tasks(cluster=cluster, tasks=[task_arn])
@@ -837,6 +860,7 @@ Resources:
                                  {'Message': 'Timeout'})
           
               except Exception as e:
+                  # Catch any errors and report to CloudFormation
                   cfnresponse.send(event, context, cfnresponse.FAILED, 
                                  {'Message': str(e)})
 
@@ -876,13 +900,17 @@ Outputs:
     Description: 'IP publique du NAT Gateway'
     Value: !Ref NATGatewayEIP
 
-  DynamoDBTableName:
-    Description: 'DynamoDB Table Name'
-    Value: !Ref DynamoDBTable
+  #  DynamoDBTableName:
+  #    Description: 'DynamoDB Table Name'
+  #    Value: !Ref DynamoDBTable
 
-  DynamoDBTableArn:
-    Description: 'DynamoDB Table ARN'
-    Value: !GetAtt DynamoDBTable.Arn
+  #  DynamoDBTableArn:
+  #    Description: 'DynamoDB Table ARN'
+  #    Value: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoDBTable}'
+
+  #  DynamoDBTableArn:
+  #    Description: 'DynamoDB Table ARN'
+  #    Value: !GetAtt DynamoDBTable.Arn
 
   VPCFlowLogsGroupName:
     Description: 'CloudWatch Log Group for VPC Flow Logs'

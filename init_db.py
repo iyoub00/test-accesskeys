@@ -3,7 +3,7 @@ import os
 import time
 
 def initialize_database():
-    print("=== Database Initialization Starting ===")
+    print("Database Initialization Starting ")
 
     # Wait for RDS to be ready
     print("Waiting for database to be ready...")
@@ -14,7 +14,7 @@ def initialize_database():
                 connect_timeout=5
             )
             conn.close()
-            print("✓ Database connection successful")
+            print("Database connection successful")
             break
         except Exception as e:
             print(f"Waiting for database... Attempt {i+1}/30: {str(e)[:50]}")
@@ -58,7 +58,7 @@ def initialize_database():
         conn.close()
 
         if recruiter_tables > 0 or candidate_tables > 0:
-            print(f"✓ Database already initialized (recruiter: {recruiter_tables} tables, candidate: {candidate_tables} tables)")
+            print(f"Database already initialized (recruiter: {recruiter_tables} tables, candidate: {candidate_tables} tables)")
             print("Skipping initialization to preserve existing data")
             return
     except Exception as e:
@@ -79,7 +79,7 @@ def initialize_database():
         with open('/app/data/init.sql', 'r') as f:
             init = f.read()
 
-        print("✓ SQL files loaded")
+        print("SQL files loaded")
     except Exception as e:
         print(f"✗ Error reading SQL files: {e}")
         return
@@ -95,14 +95,14 @@ def initialize_database():
         print("Executing DDL (schema creation)...")
         cursor.execute(ddl)
         conn.commit()
-        print("✓ DDL executed successfully")
+        print("DDL executed successfully")
 
         print("Executing initial data population...")
         cursor.execute(init)
         conn.commit()
-        print("✓ Initial data populated successfully")
+        print("Initial data populated successfully")
 
-        print("\n=== Database Initialization Complete ===")
+        print("\n Database Initialization Complete ")
 
     except Exception as e:
         print(f"\n✗ Error during initialization: {e}")

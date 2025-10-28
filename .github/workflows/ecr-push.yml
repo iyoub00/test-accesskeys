@@ -31,7 +31,7 @@ jobs:
       - name: Compute version tag (Vx.y.zz from commit count)
         id: ver
         run: |
-          COMMITS=$(git rev-list --count --first-parent HEAD)
+          COMMITS=$(git rev-list --all --count)
           X=$(( COMMITS / 1000 ))
           Y=$(( (COMMITS / 100) % 10 ))
           Z=$(( COMMITS % 100 ))

@@ -9,4 +9,4 @@ def hello():
     return "Hello user from ECR-deployed container!, version 2\n"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=8000)

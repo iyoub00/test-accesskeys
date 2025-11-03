@@ -11,7 +11,7 @@
       "name": "app-container",
       "image": "REPLACED_BY_ACTION",
       "essential": true,
-      "portMappings": [{ "containerPort": 5000, "protocol": "tcp" }],
+      "portMappings": [{ "containerPort": 8000, "protocol": "tcp" }],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {

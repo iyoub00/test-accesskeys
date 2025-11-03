@@ -1,0 +1,535 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Silicon Talent Acquisition Model - Elastic Beanstalk deployment'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: 'silicon-talent-acquisition-model'
+    Description: 'Project name prefix for tags and resource names'
+
+  ContainerImage:
+    Type: String
+    Default: '789650815687.dkr.ecr.eu-west-1.amazonaws.com/silicon-talent-acquisition-agent/model:latest'
+    Description: 'ECR Image URI (repo:tag) for the model'
+
+  AppPort:
+    Type: Number
+    Default: 8000
+    Description: 'Container HTTP port'
+
+  ApplicationsTableName:
+    Type: String
+    Default: 'silicon-talent-acquisition-model-applications'
+
+  BehavioralTableName:
+    Type: String
+    Default: 'silicon-talent-acquisition-model-behavioral'
+
+  NerTableName:
+    Type: String
+    Default: 'silicon-talent-acquisition-model-ner'
+
+  PracticalTableName:
+    Type: String
+    Default: 'silicon-talent-acquisition-model-practical'
+
+  InstanceType:
+    Type: String
+    Default: 't3.medium'
+    Description: 'EC2 instance type for Elastic Beanstalk environment'
+    AllowedValues:
+      - t3.small
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+
+Resources:
+
+  # VPC & Networking
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: app
+          Value: 'silicon-talent-acquisition-model'
+        - Key: Name
+          Value: !Sub '${ProjectName}-vpc'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: app
+          Value: 'silicon-talent-acquisition-model'
+        - Key: Name
+          Value: !Sub '${ProjectName}-igw'
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: app
+          Value: 'silicon-talent-acquisition-model'
+        - Key: Name
+          Value: !Sub '${ProjectName}-public-1'
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: app
+          Value: 'silicon-talent-acquisition-model'
+        - Key: Name
+          Value: !Sub '${ProjectName}-public-2'
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.11.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: app
+          Value: 'silicon-talent-acquisition-model'
+        - Key: Name
+          Value: !Sub '${ProjectName}-private-1'
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.12.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: app
+          Value: 'silicon-talent-acquisition-model'
+        - Key: Name
+          Value: !Sub '${ProjectName}-private-2'
+
+  NATGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachGateway
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: app
+          Value: 'silicon-talent-acquisition-model'
+        - Key: Name
+          Value: !Sub '${ProjectName}-nat-eip'
+
+  NATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: app
+          Value: 'silicon-talent-acquisition-model'
+        - Key: Name
+          Value: !Sub '${ProjectName}-nat'
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: app
+          Value: 'silicon-talent-acquisition-model'
+        - Key: Name
+          Value: !Sub '${ProjectName}-public-rt'
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RTAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RTAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: app
+          Value: 'silicon-talent-acquisition-model'
+        - Key: Name
+          Value: !Sub '${ProjectName}-private-rt'
+
+  PrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway
+
+  PrivateSubnet1RTAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RTAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  # DynamoDB VPC Endpoint
+  DynamoDBVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.dynamodb'
+      VpcId: !Ref VPC
+      RouteTableIds:
+        - !Ref PrivateRouteTable
+        - !Ref PublicRouteTable
+      VpcEndpointType: Gateway
+      Tags:
+        - Key: app
+          Value: 'silicon-talent-acquisition-model'
+        - Key: Name
+          Value: !Sub '${ProjectName}-dynamodb-endpoint'
+
+  # Security Group for Elastic Beanstalk instances
+  EBInstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Security group for Elastic Beanstalk instances'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref EBLoadBalancerSecurityGroup
+        - IpProtocol: tcp
+          FromPort: !Ref AppPort
+          ToPort: !Ref AppPort
+          SourceSecurityGroupId: !Ref EBLoadBalancerSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: app
+          Value: 'silicon-talent-acquisition-model'
+        - Key: Name
+          Value: !Sub '${ProjectName}-eb-instance-sg'
+
+  # Security Group for Load Balancer
+  EBLoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Security group for Elastic Beanstalk Load Balancer'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: app
+          Value: 'silicon-talent-acquisition-model'
+        - Key: Name
+          Value: !Sub '${ProjectName}-eb-alb-sg'
+
+  # IAM Role for EC2 instances
+  EBInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkMulticontainerDocker
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWorkerTier
+      Policies:
+        - PolicyName: BedrockInvoke
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'bedrock:InvokeModel'
+                  - 'bedrock:InvokeModelWithResponseStream'
+                Resource: !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/*'
+        - PolicyName: ComprehendDetect
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'comprehend:Detect*'
+                  - 'comprehend:BatchDetect*'
+                Resource: '*'
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:PutItem'
+                  - 'dynamodb:GetItem'
+                  - 'dynamodb:UpdateItem'
+                  - 'dynamodb:DeleteItem'
+                  - 'dynamodb:Query'
+                  - 'dynamodb:Scan'
+                  - 'dynamodb:BatchGetItem'
+                  - 'dynamodb:BatchWriteItem'
+                Resource:
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ApplicationsTableName}'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${BehavioralTableName}'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${NerTableName}'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PracticalTableName}'
+        - PolicyName: ECRAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ecr:GetAuthorizationToken'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'ecr:BatchCheckLayerAvailability'
+                  - 'ecr:GetDownloadUrlForLayer'
+                  - 'ecr:BatchGetImage'
+                Resource: !Sub 'arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/*'
+      Tags:
+        - Key: app
+          Value: 'silicon-talent-acquisition-model'
+
+  # Instance Profile
+  EBInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EBInstanceRole
+
+  # IAM Role for Elastic Beanstalk Service
+  EBServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: elasticbeanstalk.amazonaws.com
+            Action: 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                sts:ExternalId: elasticbeanstalk
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkEnhancedHealth
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkManagedUpdatesCustomerRolePolicy
+      Tags:
+        - Key: app
+          Value: 'silicon-talent-acquisition-model'
+
+  # Elastic Beanstalk Application
+  EBApplication:
+    Type: AWS::ElasticBeanstalk::Application
+    Properties:
+      ApplicationName: !Sub '${ProjectName}'
+      Description: 'Silicon Talent Acquisition Model Application'
+      Tags:
+        - Key: app
+          Value: 'silicon-talent-acquisition-model'
+
+  # Elastic Beanstalk Application Version
+  EBApplicationVersion:
+    Type: AWS::ElasticBeanstalk::ApplicationVersion
+    Properties:
+      ApplicationName: !Ref EBApplication
+      Description: 'Initial version'
+      SourceBundle:
+        S3Bucket: !Sub 'elasticbeanstalk-samples-${AWS::Region}'
+        S3Key: 'docker-sample-v3.zip'
+      Tags:
+        - Key: app
+          Value: 'silicon-talent-acquisition-model'
+
+  # Elastic Beanstalk Environment
+  EBEnvironment:
+    Type: AWS::ElasticBeanstalk::Environment
+    Properties:
+      ApplicationName: !Ref EBApplication
+      EnvironmentName: !Sub '${ProjectName}-env'
+      Description: 'Silicon Talent Acquisition Model Environment'
+      SolutionStackName: '64bit Amazon Linux 2023 v4.4.2 running Docker'
+      VersionLabel: !Ref EBApplicationVersion
+      OptionSettings:
+        # VPC Configuration
+        - Namespace: aws:ec2:vpc
+          OptionName: VPCId
+          Value: !Ref VPC
+        - Namespace: aws:ec2:vpc
+          OptionName: Subnets
+          Value: !Sub '${PrivateSubnet1},${PrivateSubnet2}'
+        - Namespace: aws:ec2:vpc
+          OptionName: ELBSubnets
+          Value: !Sub '${PublicSubnet1},${PublicSubnet2}'
+
+        # Instance Configuration
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: IamInstanceProfile
+          Value: !Ref EBInstanceProfile
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: InstanceType
+          Value: !Ref InstanceType
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: SecurityGroups
+          Value: !Ref EBInstanceSecurityGroup
+
+        # Auto Scaling Configuration
+        - Namespace: aws:autoscaling:asg
+          OptionName: MinSize
+          Value: '1'
+        - Namespace: aws:autoscaling:asg
+          OptionName: MaxSize
+          Value: '4'
+
+        # Load Balancer Configuration
+        - Namespace: aws:elasticbeanstalk:environment
+          OptionName: LoadBalancerType
+          Value: application
+        - Namespace: aws:elbv2:loadbalancer
+          OptionName: SecurityGroups
+          Value: !Ref EBLoadBalancerSecurityGroup
+        - Namespace: aws:elbv2:loadbalancer
+          OptionName: ManagedSecurityGroup
+          Value: !Ref EBLoadBalancerSecurityGroup
+
+        # Health Check Configuration
+        - Namespace: aws:elasticbeanstalk:environment:process:default
+          OptionName: HealthCheckPath
+          Value: '/'
+        - Namespace: aws:elasticbeanstalk:environment:process:default
+          OptionName: Port
+          Value: !Ref AppPort
+        - Namespace: aws:elasticbeanstalk:environment:process:default
+          OptionName: Protocol
+          Value: HTTP
+
+        # Service Role
+        - Namespace: aws:elasticbeanstalk:environment
+          OptionName: ServiceRole
+          Value: !Ref EBServiceRole
+
+        # Enhanced Health Reporting
+        - Namespace: aws:elasticbeanstalk:healthreporting:system
+          OptionName: SystemType
+          Value: enhanced
+
+        # Managed Updates
+        - Namespace: aws:elasticbeanstalk:managedactions
+          OptionName: ManagedActionsEnabled
+          Value: 'true'
+        - Namespace: aws:elasticbeanstalk:managedactions
+          OptionName: PreferredStartTime
+          Value: 'Sun:03:00'
+        - Namespace: aws:elasticbeanstalk:managedactions:platformupdate
+          OptionName: UpdateLevel
+          Value: minor
+
+        # Environment Variables
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: APPLICATIONS_TABLE
+          Value: !Ref ApplicationsTableName
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: BEHAVIORAL_TABLE
+          Value: !Ref BehavioralTableName
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: NER_TABLE
+          Value: !Ref NerTableName
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: PRACTICAL_TABLE
+          Value: !Ref PracticalTableName
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: CONTAINER_IMAGE
+          Value: !Ref ContainerImage
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: PORT
+          Value: !Ref AppPort
+
+      Tags:
+        - Key: app
+          Value: 'silicon-talent-acquisition-model'
+
+Outputs:
+  VPCId:
+    Description: VPC ID
+    Value: !Ref VPC
+
+  EBApplicationName:
+    Description: Elastic Beanstalk Application Name
+    Value: !Ref EBApplication
+
+  EBEnvironmentName:
+    Description: Elastic Beanstalk Environment Name
+    Value: !Ref EBEnvironment
+
+  EBEnvironmentURL:
+    Description: URL of the Elastic Beanstalk Environment
+    Value: !GetAtt EBEnvironment.EndpointURL
+
+  NATGatewayIP:
+    Description: NAT Gateway public IP
+    Value: !Ref NATGatewayEIP
+
+  BehavioralTableName:
+    Description: Behavioral DynamoDB table
+    Value: !Ref BehavioralTableName
+
+  ApplicationsTableName:
+    Description: Applications DynamoDB table
+    Value: !Ref ApplicationsTableName
+
+  NerTableName:
+    Description: Ner DynamoDB table
+    Value: !Ref NerTableName
+
+  PracticalTableName:
+    Description: Practical DynamoDB table
+    Value: !Ref PracticalTableName

@@ -21,7 +21,7 @@ Parameters:
 
   ContainerImage:
     Type: String
-    Default: '789650815687.dkr.ecr.eu-west-1.amazonaws.com/silicon-talent-acquisition-agent/app:4bd13d45f651ffdd2b6912a708c7599547ff6ec4'
+    Default: '881490114584.dkr.ecr.eu-west-1.amazonaws.com/silicon-talent-acquisition-agent/app:latest'
     Description: 'ECR Image URI (repo:tag) for both ECS task definitions'
 
   AppPort:
@@ -403,6 +403,7 @@ Resources:
   ECSTaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: silicon-talent-acquisition-ecs-execution-role
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -421,6 +422,7 @@ Resources:
   ECSTaskRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: silicon-talent-acquisition-ecs-task-role
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:

@@ -1,0 +1,47 @@
+AWSAppRunnerServicePolicyForECRAccess
+
+
+
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Sid": "AppRunnerCore",
+      "Effect": "Allow",
+      "Action": [
+        "apprunner:CreateService",
+        "apprunner:UpdateService",
+        "apprunner:DeleteService",
+        "apprunner:Describe*",
+        "apprunner:List*",
+        "apprunner:AssociateCustomDomain",
+        "apprunner:DisassociateCustomDomain",
+        "apprunner:CreateVpcConnector",
+        "apprunner:UpdateVpcConnector",
+        "apprunner:DeleteVpcConnector"
+      ],
+      "Resource": "*"
+    },
+    { "Sid": "PassRolesToAppRunner",
+      "Effect": "Allow",
+      "Action": ["iam:PassRole","iam:GetRole"],
+      "Resource": [
+        "arn:aws:iam::789650815687:role/AppRunnerECRAccessRole",
+        "arn:aws:iam::789650815687:role/AppRunnerInstanceRole"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": [
+            "build.apprunner.amazonaws.com",
+            "tasks.apprunner.amazonaws.com"
+          ]
+        }
+      }
+    },
+    { "Sid": "CreateServiceLinkedRoleIfNeeded",
+      "Effect": "Allow",
+      "Action": "iam:CreateServiceLinkedRole",
+      "Resource": "*",
+      "Condition": { "StringEquals": { "iam:AWSServiceName": "apprunner.amazonaws.com" } }
+    }
+  ]
+}

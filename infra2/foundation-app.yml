@@ -1,0 +1,277 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'silicon talent acquisition - Foundation Stack (VPC, Subnets, RDS)'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: 'silicon-talent-acquisition'
+
+  DBUsername:
+    Type: String
+    Default: 'master'
+
+  DBPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+
+  ApplicationsTableName:
+    Type: String
+    Default: 'silicon-talent-acquisition-model-applications'
+  BehavioralTableName:
+    Type: String
+    Default: 'silicon-talent-acquisition-model-behavioral'
+  NerTableName:
+    Type: String
+    Default: 'silicon-talent-acquisition-model-ner'
+  PracticalTableName:
+    Type: String
+    Default: 'silicon-talent-acquisition-model-practical'
+
+  LogStreamCandidate:
+    Type: String
+    Default: 'silicon-talent-acquisition-agent-candidate'
+    Description: 'Log stream for candidate operations'
+
+  LogStreamRecruiter:
+    Type: String
+    Default: 'silicon-talent-acquisition-agent-recruiter'
+    Description: 'Log stream for recruiter operations'
+
+  LogStreamSystem:
+    Type: String
+    Default: 'silicon-talent-acquisition-agent-system'
+    Description: 'Log stream for system operations'
+
+
+Resources:
+
+  # Networking
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-vpc'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.11.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.12.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+
+  NATGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachGateway
+    Properties:
+      Domain: vpc
+
+  NATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1Association:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2Association:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway
+
+  PrivateSubnet1Association:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2Association:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+
+  # Security Groups
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Security group for RDS'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 10.0.0.0/16   # allow private subnets
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-rds-sg'
+
+
+  # RDS Database
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: 'Subnets for RDS'
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    Properties:
+      DBInstanceClass: db.t3.micro
+      Engine: postgres
+      Port: 5432
+      AllocatedStorage: 20
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      MultiAZ: false
+      PubliclyAccessible: false
+      StorageType: gp3
+      EnableCloudwatchLogsExports:
+        - postgresql
+
+Outputs:
+  VPCId:
+    Value: !Ref VPC
+    Export:
+      Name: SiliconFoundation-VPCId
+
+  PrivateSubnet1:
+    Value: !Ref PrivateSubnet1
+    Export:
+      Name: SiliconFoundation-PrivateSubnet1
+
+  PrivateSubnet2:
+    Value: !Ref PrivateSubnet2
+    Export:
+      Name: SiliconFoundation-PrivateSubnet2
+
+  RDSEndpoint:
+    Value: !GetAtt RDSInstance.Endpoint.Address
+    Export:
+      Name: SiliconFoundation-RDSEndpoint
+
+  RDSSecurityGroup:
+    Value: !Ref RDSSecurityGroup
+    Export:
+      Name: SiliconFoundation-RDSSecurityGroup
+
+  BehavioralTableName:
+    Description: Behavioral DynamoDB table
+    Value: !Ref BehavioralTableName
+
+  ApplicationsTableName:
+    Description: Applications DynamoDB table
+    Value: !Ref ApplicationsTableName
+
+  NerTableName:
+    Description: Ner DynamoDB table
+    Value: !Ref NerTableName
+
+  PracticalTableName:
+    Description: Practical DynamoDB table
+    Value: !Ref PracticalTableName
+
+  LogStreamCandidate:
+    Value: !Ref LogStreamCandidate
+    Export:
+      Name: SiliconFoundation-LogStreamCandidate
+
+  LogStreamRecruiter:
+    Value: !Ref LogStreamRecruiter
+    Export:
+      Name: SiliconFoundation-LogStreamRecruiter
+
+  LogStreamSystem:
+    Value: !Ref LogStreamSystem
+    Export:
+      Name: SiliconFoundation-LogStreamSystem
+  PublicSubnet1:
+    Value: !Ref PublicSubnet1
+    Export:
+      Name: SiliconFoundation-PublicSubnet1
+
+  PublicSubnet2:
+    Value: !Ref PublicSubnet2
+    Export:
+      Name: SiliconFoundation-PublicSubnet2
+
+  VPCCIDR:
+    Value: !GetAtt VPC.CidrBlock
+    Export:
+      Name: SiliconFoundation-VPCCIDR

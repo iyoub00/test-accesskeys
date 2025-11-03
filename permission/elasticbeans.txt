@@ -1,0 +1,47 @@
+{
+  "Sid": "EBEnvAdmin",
+  "Effect": "Allow",
+  "Action": [
+    "elasticbeanstalk:CreateApplication",
+    "elasticbeanstalk:UpdateApplication",
+    "elasticbeanstalk:CreateEnvironment",
+    "elasticbeanstalk:TerminateEnvironment",
+    "elasticbeanstalk:AbortEnvironmentUpdate",
+    "elasticbeanstalk:RebuildEnvironment",
+    "elasticbeanstalk:RestartAppServer",
+    "elasticbeanstalk:SwapEnvironmentCNAMEs",
+    "elasticbeanstalk:DeleteApplicationVersion"
+  ],
+  "Resource": "*"
+},
+{
+  "Sid": "CFNStacksForEB",
+  "Effect": "Allow",
+  "Action": [
+    "cloudformation:CreateStack",
+    "cloudformation:UpdateStack",
+    "cloudformation:DeleteStack",
+    "cloudformation:Describe*",
+    "cloudformation:Get*",
+    "cloudformation:List*"
+  ],
+  "Resource": "*"
+},
+{
+  "Sid": "ELBv2Targets",
+  "Effect": "Allow",
+  "Action": [
+    "elasticloadbalancing:RegisterTargets",
+    "elasticloadbalancing:DeregisterTargets",
+    "elasticloadbalancing:DescribeTargetGroups",
+    "elasticloadbalancing:DescribeListeners",
+    "elasticloadbalancing:DescribeLoadBalancers"
+  ],
+  "Resource": "*"
+},
+{
+  "Sid": "ServiceLinkedRoleCreation",
+  "Effect": "Allow",
+  "Action": "iam:CreateServiceLinkedRole",
+  "Resource": "*"
+}

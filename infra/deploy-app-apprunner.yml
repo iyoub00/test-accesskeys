@@ -1,0 +1,328 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'silicon talent acquisition (App Runner + RDS in VPC)'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: 'silicon-talent-acquisition'
+
+  DBUsername:
+    Type: String
+    Default: 'master'
+    NoEcho: false
+
+  DBPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+
+  ContainerImage:
+    Type: String
+    Default: '789650815687.dkr.ecr.eu-west-1.amazonaws.com/silicon-talent-acquisition-agent/app:latest'
+
+  AppPort:
+    Type: Number
+    Default: 5000
+
+  LogGroupName:
+    Type: String
+    Default: 'silicon-talent-acquisition-agent'
+
+  LogStreamCandidate:
+    Type: String
+    Default: 'silicon-talent-acquisition-agent-candidate'
+
+  LogStreamRecruiter:
+    Type: String
+    Default: 'silicon-talent-acquisition-agent-recruiter'
+
+  LogStreamSystem:
+    Type: String
+    Default: 'silicon-talent-acquisition-agent-system'
+
+  S3Bucket:
+    Type: String
+    Default: 'silicon-talent-acquisition-agent'
+
+Resources:
+  # ---------------------------
+  # Networking (VPC, Subnets, Routes)
+  # ---------------------------
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-vpc'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.11.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.12.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+
+  NATGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachGateway
+    Properties:
+      Domain: vpc
+
+  NATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet1
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet2
+
+  # ---------------------------
+  # Security Groups
+  # ---------------------------
+  AppRunnerConnectorSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'App Runner VPC connector'
+      VpcId: !Ref VPC
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'RDS Security Group'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref AppRunnerConnectorSecurityGroup
+
+  # ---------------------------
+  # RDS (PostgreSQL)
+  # ---------------------------
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: 'Subnet group for RDS'
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    Properties:
+      DBInstanceClass: db.t3.micro
+      Engine: postgres
+      Port: 5432
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      AllocatedStorage: '20'
+      StorageType: gp3
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      PubliclyAccessible: false
+      MultiAZ: false
+      EnableCloudwatchLogsExports:
+        - postgresql
+
+  # ---------------------------
+  # App Runner Roles + Service
+  # ---------------------------
+  AppRunnerECRAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apprunner.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+
+  AppRunnerInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: tasks.apprunner.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: AppPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${S3Bucket}'
+                  - !Sub 'arn:aws:s3:::${S3Bucket}/*'
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: 'arn:aws:bedrock:eu-west-1::foundation-model/amazon.titan-embed-text-v2:0'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:${LogGroupName}:*'
+
+  AppRunnerVpcConnector:
+    Type: AWS::AppRunner::VpcConnector
+    Properties:
+      Subnets:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroups:
+        - !Ref AppRunnerConnectorSecurityGroup
+
+  AppRunnerService:
+    Type: AWS::AppRunner::Service
+    Properties:
+      ServiceName: !Sub '${ProjectName}-app'
+      InstanceConfiguration:
+        Cpu: "1 vCPU"
+        Memory: "2 GB"
+        InstanceRoleArn: !GetAtt AppRunnerInstanceRole.Arn
+      SourceConfiguration:
+        AutoDeploymentsEnabled: true
+        AuthenticationConfiguration:
+          AccessRoleArn: !GetAtt AppRunnerECRAccessRole.Arn
+        ImageRepository:
+          ImageRepositoryType: ECR
+          ImageIdentifier: !Ref ContainerImage
+          ImageConfiguration:
+            Port: !Sub '${AppPort}'
+            RuntimeEnvironmentVariables:
+              - Name: S3_BUCKET
+                Value: !Ref S3Bucket
+              - Name: RDS_ENDPOINT
+                Value: !GetAtt RDSInstance.Endpoint.Address
+              - Name: DB_NAME
+                Value: 'silicon_talent_acquisition_app'
+              - Name: DB_USER
+                Value: !Ref DBUsername
+              - Name: DB_PASS
+                Value: !Ref DBPassword
+              - Name: DB_HOST
+                Value: !GetAtt RDSInstance.Endpoint.Address
+              - Name: DB_PORT
+                Value: '5432'
+              - Name: LOG_GROUP_NAME
+                Value: !Ref LogGroupName
+              - Name: LOG_STREAM_NAME_CANDIDATE
+                Value: !Ref LogStreamCandidate
+              - Name: LOG_STREAM_NAME_RECRUITER
+                Value: !Ref LogStreamRecruiter
+              - Name: LOG_STREAM_NAME_SYSTEM
+                Value: !Ref LogStreamSystem
+      NetworkConfiguration:
+        EgressConfiguration:
+          EgressType: VPC
+          VpcConnectorArn: !GetAtt AppRunnerVpcConnector.VpcConnectorArn
+      HealthCheckConfiguration:
+        Protocol: HTTP
+        Path: /
+        HealthyThreshold: 1
+        Interval: 10
+        Timeout: 5
+        UnhealthyThreshold: 5
+
+Outputs:
+  RDSEndpoint:
+    Value: !GetAtt RDSInstance.Endpoint.Address
+
+  AppRunnerServiceUrl:
+    Value: !GetAtt AppRunnerService.ServiceUrl

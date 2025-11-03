@@ -1,0 +1,25 @@
+{
+  "family": "silicon-talent-acquisition-app-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::${ACCOUNT_ID}:role/silicon-talent-acquisition-ecs-execution-role",
+  "taskRoleArn": "arn:aws:iam::${ACCOUNT_ID}:role/silicon-talent-acquisition-ecs-task-role",
+  "containerDefinitions": [
+    {
+      "name": "app-container",
+      "image": "REPLACED_BY_ACTION",
+      "essential": true,
+      "portMappings": [{ "containerPort": 5000, "protocol": "tcp" }],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/silicon-talent-acquisition-${STACK_NAME}",
+          "awslogs-region": "eu-west-1",
+          "awslogs-stream-prefix": "app"
+        }
+      }
+    }
+  ]
+}

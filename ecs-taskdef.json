@@ -19,7 +19,21 @@
           "awslogs-region": "eu-west-1",
           "awslogs-stream-prefix": "app"
         }
-      }
+      },
+      "environment": [
+        { "name": "S3_BUCKET", "value": "silicon-talent-acquisition-agent" },
+        { "name": "RDS_ENDPOINT", "value": "silicon-talent-acquisition-rdsinstance-yaovlh5uti6g.c1mkq40a819n.eu-west-1.rds.amazonaws.com" },
+        { "name": "DB_NAME", "value": "silicon_talent_acquisition_app" },
+        { "name": "DB_USER", "value": "master" },
+        { "name": "DB_PASS", "value": "postgres" },
+        { "name": "DB_HOST", "value": "silicon-talent-acquisition-rdsinstance-yaovlh5uti6g.c1mkq40a819n.eu-west-1.rds.amazonaws.com" },
+        { "name": "DB_PORT", "value": "5432" },
+        { "name": "LOG_GROUP_NAME", "value": "silicon-talent-acquisition-agent" },
+        { "name": "LOG_STREAM_NAME_CANDIDATE", "value": "silicon-talent-acquisition-agent-candidate" },
+        { "name": "LOG_STREAM_NAME_RECRUITER", "value": "silicon-talent-acquisition-agent-recruiter" },
+        { "name": "LOG_STREAM_NAME_SYSTEM", "value": "silicon-talent-acquisition-agent-system" },
+        { "name": "BUCKET_NAME", "value": "silicon-talent-acquisition-agent" }
+      ]
     }
   ]
 }

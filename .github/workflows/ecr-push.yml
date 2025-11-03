@@ -1,0 +1,92 @@
+name: Build & Deploy to ECS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-west-1
+  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}  # e.g. "ecr"
+  ECS_CLUSTER:  ${{ secrets.ECS_CLUSTER }}       # "silicon-talent-cluster"
+  ECS_SERVICE:  ${{ secrets.ECS_SERVICE }}       # "silicon-talent-app-service"
+  TASKDEF_PATH: ecs-taskdef.json
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::881490114584:role/GitHubActionsEcsDeployer
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Compute version tag (Vx.y.zz from commit count)
+        id: ver
+        run: |
+          COMMITS=$(git rev-list --all --count)
+          X=$(( COMMITS / 1000 ))
+          Y=$(( (COMMITS / 100) % 10 ))
+          Z=$(( COMMITS % 100 ))
+          printf -v ZPAD "%02d" "$Z"
+          VERSION="V${X}.${Y}.${ZPAD}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "COMMITS=$COMMITS  ->  $VERSION"
+
+      - name: Build & push image
+        id: build
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPO:     ${{ env.ECR_REPOSITORY }}
+          TAG:      ${{ env.VERSION }}
+        run: |
+          IMAGE_URI="$REGISTRY/$REPO:$TAG"
+          docker build -t "$IMAGE_URI" .
+          docker tag "$IMAGE_URI" "$REGISTRY/$REPO:latest"
+          docker push "$IMAGE_URI"
+          docker push "$REGISTRY/$REPO:latest"
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_OUTPUT
+
+      - name: Resolve ACCOUNT_ID and STACK_NAME in taskdef
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          STACK_NAME="silicon-talent-acquisition"   # <-- your CFN stack name
+          jq --arg acc "$ACCOUNT_ID" --arg st "$STACK_NAME" '
+            .executionRoleArn |= sub("\\$\\{ACCOUNT_ID\\}"; $acc) |
+            .taskRoleArn      |= sub("\\$\\{ACCOUNT_ID\\}"; $acc) |
+            .containerDefinitions[0].logConfiguration.options["awslogs-group"] |=
+              sub("\\$\\{STACK_NAME\\}"; $st)
+          ' ecs-taskdef.json > ecs-taskdef.resolved.json
+          mv ecs-taskdef.resolved.json ecs-taskdef.json
+
+      - name: Render task definition with new image
+        id: render
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ env.TASKDEF_PATH }}
+          container-name: app-container
+          image: ${{ steps.build.outputs.IMAGE_URI }}
+
+      - name: Deploy Amazon ECS task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+          force-new-deployment: true

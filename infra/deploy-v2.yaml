@@ -388,6 +388,7 @@ Resources:
   ECSCluster:
     Type: AWS::ECS::Cluster
     Properties:
+      ClusterName: silicon-talent-cluster
       CapacityProviders:
         - FARGATE
         - FARGATE_SPOT
@@ -453,12 +454,12 @@ Resources:
                   - 's3:GetObject'
                   - 's3:PutObject'
                   - 's3:ListBucket'
-                #                Resource:
-                #                  - !Sub 'arn:aws:s3:::${S3Bucket}'
-                #                  - !Sub 'arn:aws:s3:::${S3Bucket}/*'
                 Resource:
-                  - !GetAtt S3Bucket.Arn
-                  - !Sub '${S3Bucket.Arn}/*'
+                  - !Sub 'arn:aws:s3:::${S3Bucket}'
+                  - !Sub 'arn:aws:s3:::${S3Bucket}/*'
+#                Resource:
+#                  - !GetAtt S3Bucket.Arn
+#                  - !Sub '${S3Bucket.Arn}/*'
         - PolicyName: BedrockAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -468,22 +469,22 @@ Resources:
                   - 'bedrock:InvokeModel'
                   - 'bedrock:InvokeModelWithResponseStream'
                 Resource: 'arn:aws:bedrock:eu-west-1::foundation-model/amazon.titan-embed-text-v2:0'
-        - PolicyName: DynamoDBAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'dynamodb:PutItem'
-                  - 'dynamodb:GetItem'
-                  - 'dynamodb:UpdateItem'
-                  - 'dynamodb:DeleteItem'
-                  - 'dynamodb:Query'
-                  - 'dynamodb:Scan'
-                  - 'dynamodb:BatchGetItem'
-                  - 'dynamodb:BatchWriteItem'
-                #                Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoDBTable}'
-                Resource: !GetAtt DynamoDBTable.Arn
+#        - PolicyName: DynamoDBAccess
+#          PolicyDocument:
+#            Version: '2012-10-17'
+#            Statement:
+#              - Effect: Allow
+#                Action:
+#                  - 'dynamodb:PutItem'
+#                  - 'dynamodb:GetItem'
+#                  - 'dynamodb:UpdateItem'
+#                  - 'dynamodb:DeleteItem'
+#                  - 'dynamodb:Query'
+#                  - 'dynamodb:Scan'
+#                  - 'dynamodb:BatchGetItem'
+#                  - 'dynamodb:BatchWriteItem'
+#                #                Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoDBTable}'
+#                Resource: !GetAtt DynamoDBTable.Arn
 
         - PolicyName: CloudWatchLogsAccess
           PolicyDocument:
@@ -570,8 +571,8 @@ Resources:
               Value: !Ref S3Bucket
             - Name: RDS_ENDPOINT
               Value: !GetAtt RDSInstance.Endpoint.Address
-            - Name: DYNAMODB_TABLE
-              Value: !Ref DynamoDBTable
+#            - Name: DYNAMODB_TABLE
+#              Value: !Ref DynamoDBTable
             - Name: DB_NAME
               Value: 'silicon_talent_acquisition_app'
             - Name: DB_USER
@@ -623,11 +624,17 @@ Resources:
     Type: AWS::ECS::Service
     DependsOn: ALBListener
     Properties:
-      ServiceName: !Sub '${ProjectName}-app-service'
+      ServiceName: silicon-talent-app-service
       Cluster: !Ref ECSCluster
       TaskDefinition: !Ref FargateTaskDefinitionApp
       DesiredCount: 1
       LaunchType: FARGATE
+      DeploymentConfiguration:
+           DeploymentCircuitBreaker:
+             Enable: true
+             Rollback: true
+           MaximumPercent: 200
+           MinimumHealthyPercent: 50
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
